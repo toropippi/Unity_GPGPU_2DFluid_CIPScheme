@@ -126,11 +126,16 @@ class Cip : MonoBehaviour
             CopyBufferToBuffer_f(YU, YUN);//これはいる！！しかしなぜなのかはわからない
             CopyBufferToBuffer_f(YV, YVN);//これはいる！！しかしなぜなのかはわからない
 
-            //粘性//ここも陽的に実装
-            //CopyBufferToBuffer_f(GXd0, YUN);
-            //CopyBufferToBuffer_f(GYd0, YVN);
-            //NSComputeShader.Dispatch(kernelnensei0, 1, WY, 1);
-            //NSComputeShader.Dispatch(kernelnensei1, 1, WY, 1);
+            //粘性
+            /*
+            CopyBufferToBuffer_f(GXd0, YUN);
+            CopyBufferToBuffer_f(GYd0, YVN);
+            for (int i = 0; i < 16; i++)
+            {
+                NSComputeShader.Dispatch(kernelnensei0, 1, WY, 1);
+                NSComputeShader.Dispatch(kernelnensei1, 1, WY, 1);
+            }
+            */
 
             //DIV
             NSComputeShader.Dispatch(kerneldiv, 1, WY, 1);

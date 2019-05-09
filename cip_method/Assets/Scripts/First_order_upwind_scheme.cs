@@ -110,11 +110,11 @@ public class First_order_upwind_scheme : MonoBehaviour
             //一次風上差分 移流 ここではYU,YVの値を使ってYUN,YUVを求めている
             NSComputeShader.Dispatch(kernelupwind0, 1, WY, 1);
             NSComputeShader.Dispatch(kernelupwind1, 1, WY, 1);
-            
+
             /*
             //粘性//ここだけなぜか陰的実装っぽいかんじ
             CopyBufferToBuffer_f(YU, YUN);
-            CopyBufferToBuffer_f(YV, YVN);
+            CopyBufferToBuffer_f(YV, YVN);//粘性
             for (int i = 0; i < 16; i++)
             {
                 NSComputeShader.Dispatch(kernelnensei0, 1, WY, 1);
