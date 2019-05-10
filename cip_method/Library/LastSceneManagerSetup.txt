@@ -1,0 +1,5 @@
+sceneSetups:
+- path: Assets/Scenes/First_order_upwind_scheme.unity
+  isLoaded: 1
+  isActive: 1
+  isSubScene: 0
