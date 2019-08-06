@@ -1,39 +1,29 @@
-﻿#pragma kernel newgrad
-#pragma kernel newgrad2
-#pragma kernel upwind0
-#pragma kernel upwind1
-#pragma kernel dcip0
-#pragma kernel dcip1
-#pragma kernel pressure0
-#pragma kernel pressure1
-#pragma kernel div
-#pragma kernel rhs
-#pragma kernel veloc
-#pragma kernel nensei0
-#pragma kernel nensei1
+﻿#pragma kernel Newgrad_u
+#pragma kernel Newgrad_v
+#pragma kernel Upwind_u
+#pragma kernel Upwind_v
+#pragma kernel Cip_u
+#pragma kernel Cip_v
+#pragma kernel Pressure0
+#pragma kernel Pressure1
+#pragma kernel Div
+#pragma kernel Rhs
+#pragma kernel Veloc
+#pragma kernel Visc
 #pragma kernel Vorticity
-#pragma kernel computebuffermemcopy_i
-#pragma kernel computebuffermemcopy_f
-#pragma kernel fillmem_f
-#pragma kernel fillmem_ui
+#pragma kernel ComputeBufferMemcopy_i
+#pragma kernel ComputeBufferMemcopy_f
 #define WX (uint)(192)
 #define WY (uint)(144)
-#define limitf 0.85f
+#define SPEEDLIMIT 0.95f
 
-float arufa;//?
 float ALPHA;//(float)1.79
-float ar1fa;//?
-float DT;//(float)1.79
+float DT;//delta time
+float MU;
 
-uint OFSET0;//データコピーの際に使用するオフセット
-uint OFSET1;//データコピーの際に使用するオフセット
-uint OFSET2;//データコピーの際に使用するオフセット
-uint OFSET3;//データコピーの際に使用するオフセット
-uint OFSETDST;//データコピーの際に使用するオフセット
-uint OFSETSRC;//データコピーの際に使用するオフセット
-
-float FCOLOR;//floatのcolorなどいろいろ
-uint UICOLOR;//uintのcolorなどいろいろ
+uint SIZE;//データコピーの際に使用する
+uint OFFSETDST;//データコピーの際に使用する
+uint OFFSETSRC;//データコピーの際に使用する
 
 RWStructuredBuffer<float> u;
 RWStructuredBuffer<float> v;
@@ -60,15 +50,15 @@ RWStructuredBuffer<float> YP;
 RWStructuredBuffer<float> YPN;
 RWStructuredBuffer<float> DIV;
 RWStructuredBuffer<float> VOR;
-RWStructuredBuffer<uint> kabe;
-RWStructuredBuffer<uint> kabeP;
-RWStructuredBuffer<uint> kabeX;
-RWStructuredBuffer<uint> kabeY;
+RWStructuredBuffer<uint> Wall;
+RWStructuredBuffer<uint> WallP;
+RWStructuredBuffer<uint> WallX;
+RWStructuredBuffer<uint> WallY;
+
 RWStructuredBuffer<uint> DATADSTI;
 RWStructuredBuffer<uint> DATASRCI;
-RWStructuredBuffer<float> DATADST;
-RWStructuredBuffer<float> DATASRC;
-RWStructuredBuffer<uint> DATADSTUI;
+RWStructuredBuffer<float> DATADSTF;
+RWStructuredBuffer<float> DATASRCF;
 
 
 
@@ -97,7 +87,7 @@ RWStructuredBuffer<uint> DATADSTUI;
 
 // (192, 1, 1)のスレッドで回す
 [numthreads(WX, 1, 1)]
-void newgrad(int2 id : SV_DispatchThreadID) 
+void Newgrad_u(int2 id : SV_DispatchThreadID) 
 {
 	int i = id.x;
 	int j = id.y;
@@ -109,13 +99,13 @@ void newgrad(int2 id : SV_DispatchThreadID)
 	j0 *= WX;
 	j1 *= WX;
 	int ij = i + j;
-	GX[ij] += (yn[i1 + j] - yn[i0 + j] - y[i1 + j] + y[i0 + j])*0.5f*(kabe[ij]>128);
-	GY[ij] += (yn[i + j1] - yn[i + j0] - y[i + j1] + y[i + j0])*0.5f*(kabe[ij]>128);
+	GX[ij] += (yn[i1 + j] - yn[i0 + j] - y[i1 + j] + y[i0 + j]) * 0.5f * (Wall[ij] > 128);
+	GY[ij] += (yn[i + j1] - yn[i + j0] - y[i + j1] + y[i + j0]) * 0.5f * (Wall[ij] > 128);
 }
-
 // (192, 1, 1)のスレッドで回す
 [numthreads(WX, 1, 1)]
-void newgrad2(int2 id : SV_DispatchThreadID) {
+void Newgrad_v(int2 id : SV_DispatchThreadID)
+{
 	int i = id.x;
 	int j = id.y;
 	int i0 = (i - 1 + WX) % WX;
@@ -126,18 +116,16 @@ void newgrad2(int2 id : SV_DispatchThreadID) {
 	j0 *= WX;
 	j1 *= WX;
 	int ij = i + j;
-	GX[ij] += (yn[i1 + j] - yn[i0 + j] - y[i1 + j] + y[i0 + j])*0.5f*(kabe[ij]>128);
-	GY[ij] += (yn[i + j1] - yn[i + j0] - y[i + j1] + y[i + j0])*0.5f*(kabe[ij]>128);
+	GX[ij] += (yn[i1 + j] - yn[i0 + j] - y[i1 + j] + y[i0 + j]) * 0.5f * (Wall[ij] > 128);
+	GY[ij] += (yn[i + j1] - yn[i + j0] - y[i + j1] + y[i + j0]) * 0.5f * (Wall[ij] > 128);
 }
-
-
 
 
 
 
 //一次風上差分のx成分
 [numthreads(WX, 1, 1)]
-void upwind0(int2 id : SV_DispatchThreadID) {
+void Upwind_u(int2 id : SV_DispatchThreadID) {
 	int i = id.x;
 	int j = id.y;
 	int i0 = (i - 1 + WX) % WX;
@@ -149,8 +137,8 @@ void upwind0(int2 id : SV_DispatchThreadID) {
 	j1 *= WX;
 	int ij = i + j;
 	float u = YU[ij];
-	float v = YVU[ij];//YUVではありません。y速度の平均が必要です。YVU[ij] = 0.25f*(tv + YVN[i0 + j] + YVN[i0 + j1]);float tv = YVN[ij] + YVN[i + j1];
-	if (kabe[ij] > 128) {
+	float v = YVU[ij];//YUVではありません。y速度の平均が必要です。
+	if (Wall[ij] > 128) {
 		if ((u >= 0.0)&(v >= 0.0)) {
 			YUN[ij] = YU[ij] - u * (YU[ij] - YU[i0 + j])*DT - v * (YU[ij] - YU[i + j0])*DT;
 		}
@@ -172,7 +160,7 @@ void upwind0(int2 id : SV_DispatchThreadID) {
 
 //一次風上差分のy成分
 [numthreads(WX, 1, 1)]
-void upwind1(int2 id : SV_DispatchThreadID) {
+void Upwind_v(int2 id : SV_DispatchThreadID) {
 	int i = id.x;
 	int j = id.y;
 	int i0 = (i - 1 + WX) % WX;
@@ -184,9 +172,9 @@ void upwind1(int2 id : SV_DispatchThreadID) {
 	j1 *= WX;
 	int ij = i + j;
 
-	float u = YUV[ij];//YVUではありません。x速度の平均が必要です。float tu = YUN[ij] + YUN[i1 + j];YUV[ij] = 0.25f*(tu + YUN[i + j0] + YUN[i1 + j0]);
+	float u = YUV[ij];//YVUではありません。x速度の平均が必要です。
 	float v = YV[ij];//
-	if (kabe[ij] > 128) {
+	if (Wall[ij] > 128) {
 		if ((u >= 0.0)&(v >= 0.0)) {
 			YVN[ij] = YV[ij] - u * (YV[ij] - YV[i0 + j])*DT - v * (YV[ij] - YV[i + j0])*DT;
 		}
@@ -211,10 +199,9 @@ void upwind1(int2 id : SV_DispatchThreadID) {
 
 
 
-
 //cip法x方向計算
 [numthreads(WX, 1, 1)]
-void dcip0(int2 id : SV_DispatchThreadID) {
+void Cip_u(int2 id : SV_DispatchThreadID) {
 	int i = id.x;
 	int j = id.y;
 	int jwx = j*WX;
@@ -274,11 +261,11 @@ void dcip0(int2 id : SV_DispatchThreadID) {
 	a1 *= xx;
 	b1 *= yy;
 
-	int kb = kabe[jwx];//壁の辺なら速度の更新を行わない
-	if (kb>128) {//流体なら。x速度の値を更新
+	int wall = Wall[jwx];//壁の辺なら速度の更新を行わない
+	if (wall >128) {//流体なら。x速度の値を更新
 		tmp0 = ((a1 + c1*yy + e1)*xx + g1*yy + gxd_jwx)*xx + ((b1 + d1*xx + f1)*yy + gyd_jwx)*yy + u_jwx;
-		if (tmp0<-limitf) { tmp0 = -limitf; }//速度クランプ
-		if (tmp0> limitf) { tmp0 = limitf; }//速度クランプ
+		if (tmp0<-SPEEDLIMIT) { tmp0 = -SPEEDLIMIT; }//速度クランプ間違って発散しても破綻しないように
+		if (tmp0> SPEEDLIMIT) { tmp0 =  SPEEDLIMIT; }//速度クランプ
 		fn[jwx] = tmp0;
 	}
 	a1 = (3.0f*a1 + 2.0f*(c1*yy + e1))*xx + (d1*yy + g1)*yy + gxd_jwx;
@@ -287,10 +274,10 @@ void dcip0(int2 id : SV_DispatchThreadID) {
 	im1 = (i + WX - 1) % WX + j*WX;
 	jm1 = (i + 1) % WX + j*WX;
 
-	if (kb>128) {//流体なら。x速度をx方向に微分した値を更新
+	if (wall >128) {//流体なら。x速度をx方向に微分した値を更新
 		tmp0 = (a1 - 0.5f*DT*(a1*(ui1 - ui0) + b1*(vi1 - vi0)));
-		if (tmp0<-limitf) { tmp0 = -limitf; }
-		if (tmp0> limitf) { tmp0 = limitf; }
+		if (tmp0<-SPEEDLIMIT) { tmp0 = -SPEEDLIMIT; }
+		if (tmp0> SPEEDLIMIT) { tmp0 = SPEEDLIMIT; }
 		gxn[jwx] = tmp0;
 	}
 
@@ -303,10 +290,10 @@ void dcip0(int2 id : SV_DispatchThreadID) {
 		if (isn == 1) { uj0 = u_j; uj1 = u[jm1]; }
 		else { uj0 = u[im1]; uj1 = u_j; }
 	}
-	if (kb>128) {//流体なら。x速度をy方向に微分した値を更新
+	if (wall >128) {//流体なら。x速度をy方向に微分した値を更新
 		tmp0 = (b1 - 0.5f*DT*(a1*(uj1 - uj0) + b1*(v[jm1] - v[im1])));
-		if (tmp0<-limitf) { tmp0 = -limitf; }
-		if (tmp0> limitf) { tmp0 = limitf; }
+		if (tmp0<-SPEEDLIMIT) { tmp0 = -SPEEDLIMIT; }
+		if (tmp0> SPEEDLIMIT) { tmp0 =  SPEEDLIMIT; }
 		gyn[jwx] = tmp0;
 	}
 }
@@ -315,7 +302,7 @@ void dcip0(int2 id : SV_DispatchThreadID) {
 
 //cip法のy方向計算
 [numthreads(WX, 1, 1)]
-void dcip1(int2 id : SV_DispatchThreadID) {
+void Cip_v(int2 id : SV_DispatchThreadID) {
 	int i = id.x;
 	int j = id.y;
 	int jwx = j*WX;
@@ -375,20 +362,20 @@ void dcip1(int2 id : SV_DispatchThreadID) {
 	a1 *= xx;
 	b1 *= yy;
 
-	int kb = kabe[jwx];//壁の辺なら速度の更新を行わない
-	if (kb>128) {//流体なら。y速度の値を更新
+	int wall = Wall[jwx];//壁の辺なら速度の更新を行わない
+	if (wall >128) {//流体なら。y速度の値を更新
 		tmp0 = ((a1 + c1*yy + e1)*xx + g1*yy + gxd_jwx)*xx + ((b1 + d1*xx + f1)*yy + gyd_jwx)*yy + v_jwx;
-		if (tmp0<-limitf) { tmp0 = -limitf; }
-		if (tmp0> limitf) { tmp0 = limitf; }
+		if (tmp0<-SPEEDLIMIT) { tmp0 = -SPEEDLIMIT; }
+		if (tmp0> SPEEDLIMIT) { tmp0 =  SPEEDLIMIT; }
 		fn[jwx] = tmp0;
 	}
 	a1 = (3.0f*a1 + 2.0f*(c1*yy + e1))*xx + (d1*yy + g1)*yy + gxd_jwx;
 	b1 = (3.0f*b1 + 2.0f*(d1*xx + f1))*yy + (c1*xx + g1)*xx + gyd_jwx;
 
-	if (kb>128) {//流体なら。y速度をx方向に微分した値を更新
+	if (wall >128) {//流体なら。y速度をx方向に微分した値を更新
 		tmp0 = (a1 - 0.5f*DT*(a1*(ui1 - ui0) + b1*(vi1 - vi0)));
-		if (tmp0<-limitf) { tmp0 = -limitf; }
-		if (tmp0> limitf) { tmp0 = limitf; }
+		if (tmp0<-SPEEDLIMIT) { tmp0 = -SPEEDLIMIT; }
+		if (tmp0> SPEEDLIMIT) { tmp0 =  SPEEDLIMIT; }
 		gxn[jwx] = tmp0;
 	}
 
@@ -401,10 +388,10 @@ void dcip1(int2 id : SV_DispatchThreadID) {
 		if (jsn == 1) { vj0 = v_j; vj1 = v[jm1]; }
 		else{ vj0 = v[im1]; vj1 = v_j; }
 	}
-	if (kb>128) {//流体なら。y速度をy方向に微分した値を更新
+	if (wall >128) {//流体なら。y速度をy方向に微分した値を更新
 		tmp0 = (b1 - 0.5f*DT*(a1*(u[jm1] - u[im1]) + b1*(vj1 - vj0)));
-		if (tmp0<-limitf) { tmp0 = -limitf; }
-		if (tmp0> limitf) { tmp0 = limitf; }
+		if (tmp0<-SPEEDLIMIT) { tmp0 = -SPEEDLIMIT; }
+		if (tmp0> SPEEDLIMIT) { tmp0 = SPEEDLIMIT; }
 		gyn[jwx] = tmp0;
 	}
 }
@@ -423,7 +410,7 @@ void dcip1(int2 id : SV_DispatchThreadID) {
 
 // (128, 1, 1)のスレッドで回す
 [numthreads(128, 1, 1)]
-void pressure0(uint id : SV_DispatchThreadID) {
+void Pressure0(uint id : SV_DispatchThreadID) {
 	uint i = id*2+1;
 	uint j = i / WX;
 	i -= j * WX + ((j % 2) == 1);//違いはここだけ
@@ -440,22 +427,22 @@ void pressure0(uint id : SV_DispatchThreadID) {
 	float f3 = YPN[j0];
 	float f4 = YPN[j1];
 
-	if (kabeP[i0]>64) { ff -= f1; }
+	if (WallP[i0]>64) { ff -= f1; }
 	else { ff -= p; }
-	if (kabeP[i1]>64) { ff -= f2; }
+	if (WallP[i1]>64) { ff -= f2; }
 	else { ff -= p; }
-	if (kabeP[j0]>64) { ff -= f3; }
+	if (WallP[j0]>64) { ff -= f3; }
 	else { ff -= p; }
-	if (kabeP[j1]>64) { ff -= f4; }
+	if (WallP[j1]>64) { ff -= f4; }
 	else { ff -= p; }
 
-	YPN[ij] -= (0.25f*ff+p)*ALPHA*(kabeP[ij]>128);
+	YPN[ij] -= (0.25f*ff+p)*ALPHA*(WallP[ij]>128);
 }
 
 
 // (128, 1, 1)のスレッドで回す
 [numthreads(128, 1, 1)]
-void pressure1(uint id : SV_DispatchThreadID) {
+void Pressure1(uint id : SV_DispatchThreadID) {
 	uint i = id * 2 + 1;
 	uint j = i / WX;
 	i -= j * WX + ((j % 2) == 0);//違いはここだけ
@@ -472,22 +459,22 @@ void pressure1(uint id : SV_DispatchThreadID) {
 	float f3 = YPN[j0];
 	float f4 = YPN[j1];
 
-	if (kabeP[i0]>64) { ff -= f1; }
+	if (WallP[i0]>64) { ff -= f1; }
 	else { ff -= p; }
-	if (kabeP[i1]>64) { ff -= f2; }
+	if (WallP[i1]>64) { ff -= f2; }
 	else { ff -= p; }
-	if (kabeP[j0]>64) { ff -= f3; }
+	if (WallP[j0]>64) { ff -= f3; }
 	else { ff -= p; }
-	if (kabeP[j1]>64) { ff -= f4; }
+	if (WallP[j1]>64) { ff -= f4; }
 	else { ff -= p; }
 
-	YPN[ij] -= (0.25f*ff + p)*ALPHA*(kabeP[ij]>128);
+	YPN[ij] -= (0.25f*ff + p)*ALPHA*(WallP[ij]>128);
 }
 
 
 
 [numthreads(WX, 1, 1)]
-void div(int2 id : SV_DispatchThreadID) {
+void Div(int2 id : SV_DispatchThreadID) {
 	int i = id.x;
 	int j = id.y;
 	int i1 = (i + 1) % WX;
@@ -502,7 +489,7 @@ void div(int2 id : SV_DispatchThreadID) {
 
 
 [numthreads(WX, 1, 1)]
-void rhs(int2 id : SV_DispatchThreadID) {
+void Rhs(int2 id : SV_DispatchThreadID) {
 	int i = id.x;
 	int j = id.y;
 	int i0 = (i - 1 + WX) % WX;
@@ -510,14 +497,14 @@ void rhs(int2 id : SV_DispatchThreadID) {
 	j *= WX;
 	j0 *= WX;
 	int ij = i + j;
-	YUN[ij] -= (YPN[ij] - YPN[i0 + j])*(kabeX[ij]>128);
-	YVN[ij] -= (YPN[ij] - YPN[i + j0])*(kabeY[ij]>128);
+	YUN[ij] -= (YPN[ij] - YPN[i0 + j])*(WallX[ij]>128);
+	YVN[ij] -= (YPN[ij] - YPN[i + j0])*(WallY[ij]>128);
 }
 
 
 //cip法で使う中間速度定義点をここで計算している
 [numthreads(WX, 1, 1)]
-void veloc(int2 id : SV_DispatchThreadID) {
+void Veloc(int2 id : SV_DispatchThreadID) {
 	int i = id.x;
 	int j = id.y;
 	int i0 = (i - 1 + WX) % WX;
@@ -536,7 +523,7 @@ void veloc(int2 id : SV_DispatchThreadID) {
 
 
 [numthreads(WX, 1, 1)]
-void nensei0(int2 id : SV_DispatchThreadID) {
+void Visc(int2 id : SV_DispatchThreadID) {
 	int i = id.x;
 	int j = id.y;
 	int i0 = (i - 1 + WX) % WX;
@@ -547,25 +534,14 @@ void nensei0(int2 id : SV_DispatchThreadID) {
 	j0 *= WX;
 	j1 *= WX;
 
-	if (kabeX[i + j]>128) { GXd[i + j] = (YU[i + j] + arufa*(YUN[i0 + j] + YUN[i1 + j] + YUN[i + j0] + YUN[i + j1]))*ar1fa; }
-	if (kabeY[i + j]>128) { GYd[i + j] = (YV[i + j] + arufa*(YVN[i0 + j] + YVN[i1 + j] + YVN[i + j0] + YVN[i + j1]))*ar1fa; }
+	if (WallX[i + j]>128) { 
+		YUN[i + j] = YU[i + j] - (YU[i0 + j] + YU[i1 + j] + YU[i + j0] + YU[i + j1]) * 0.25f * DT * MU;
+	}
+	if (WallY[i + j]>128) { 
+		YVN[i + j] = YV[i + j] - (YV[i0 + j] + YV[i1 + j] + YV[i + j0] + YV[i + j1]) * 0.25f * DT * MU;
+	}
 }
 
-
-[numthreads(WX, 1, 1)]
-void nensei1(int2 id : SV_DispatchThreadID) {
-	int i = id.x;
-	int j = id.y;
-	int i0 = (i - 1 + WX) % WX;
-	int i1 = (i + 1) % WX;
-	int j0 = (j - 1 + WY) % WY;
-	int j1 = (j + 1) % WY;
-	j *= WX;
-	j0 *= WX;
-	j1 *= WX;
-	if (kabeX[i + j]>128) { YUN[i + j] = (YU[i + j] + arufa*(GXd[i0 + j] + GXd[i1 + j] + GXd[i + j0] + GXd[i + j1]))*ar1fa; }
-	if (kabeY[i + j]>128) { YVN[i + j] = (YV[i + j] + arufa*(GYd[i0 + j] + GYd[i1 + j] + GYd[i + j0] + GYd[i + j1]))*ar1fa; }
-}
 
 
 
@@ -599,37 +575,19 @@ void Vorticity(int2 id : SV_DispatchThreadID)
 
 //配列コピーint版、完全コピー用
 [numthreads(64, 1, 1)]
-void computebuffermemcopy_i(uint id : SV_DispatchThreadID)
+void ComputeBufferMemcopy_i(uint id : SV_DispatchThreadID)
 {
-	if (id < OFSET0) {
-		DATADSTI[id + OFSETDST] = DATASRCI[id + OFSETSRC];
+	if (id < SIZE) {
+		DATADSTI[id + OFFSETDST] = DATASRCI[id + OFFSETSRC];
 	}
 }
 
 
 //配列コピーfloat版、完全コピー用
 [numthreads(64, 1, 1)]
-void computebuffermemcopy_f(uint id : SV_DispatchThreadID)
+void ComputeBufferMemcopy_f(uint id : SV_DispatchThreadID)
 {
-	if (id < OFSET0) {
-		DATADST[id+ OFSETDST] = DATASRC[id+ OFSETSRC];
-	}
-}
-
-//fill関数float版
-[numthreads(64, 1, 1)]
-void fillmem_f(uint id : SV_DispatchThreadID)
-{
-	if (id < OFSET0) {
-		DATADST[id + OFSETDST] = FCOLOR;
-	}
-}
-
-//fill関数uint版
-[numthreads(64, 1, 1)]
-void fillmem_ui(uint id : SV_DispatchThreadID)
-{
-	if (id < OFSET0) {
-		DATADSTUI[id + OFSETDST] = UICOLOR;
+	if (id < SIZE) {
+		DATADSTF[id+ OFFSETDST] = DATASRCF[id+ OFFSETSRC];
 	}
 }
