@@ -1,9 +1,11 @@
 ﻿using UnityEngine;
 using System.Runtime.InteropServices;
+using UnityEngine.UI;
 using UnityEngine.Rendering;
 
 public class FluidSim2D : MonoBehaviour
 {
+    [SerializeField] RawImage image;
     const int WX = 192;
     const int WY = 144;
     const float DT = 1.00f;//デルタタイム
@@ -11,9 +13,7 @@ public class FluidSim2D : MonoBehaviour
     const float ALPHA = 1.79f;//SOR法の加速係数
     int METHOD;//CIP法なら1、一次風上差分なら0
     public Shader heatmapShader;///ヒートマップをレンダリングするシェーダー//
-    Material heatmapMaterial;///heatmapのマテリアル heatmapShaderと紐づけされる
     public ComputeShader NSComputeShader;///NS.compute 流体の更新を行うコンピュートシェーダー 
-    CommandBuffer commandBuffer;
     ComputeBuffer YU;//ここではGPUで扱う流体の物理量は大文字としておく
     ComputeBuffer YUN;
     ComputeBuffer YV;
@@ -34,6 +34,7 @@ public class FluidSim2D : MonoBehaviour
     ComputeBuffer WallP;
     ComputeBuffer WallX;
     ComputeBuffer WallY;
+    RenderTexture renderTexture;//表示の時だけ使う
 
     //カーネル
     int kernelnewgrad_u;
@@ -59,8 +60,13 @@ public class FluidSim2D : MonoBehaviour
         if (METHOD == 0) Debug.Log("1st Order Upwinding");
         if (METHOD == 1) Debug.Log("CIP");
 
-        //シェーダー系設定
-        heatmapMaterial = new Material(heatmapShader);
+        //RenderTexture系
+        renderTexture = new RenderTexture(WX, WY, 1, RenderTextureFormat.ARGB32);
+        renderTexture.enableRandomWrite = true;
+        //renderTexture.filterMode = FilterMode.Point;//読み取り時に自動補間しない
+        //renderTexture.wrapMode = TextureWrapMode.Clamp;//境界条件みたいな
+        renderTexture.Create();
+        image.texture = renderTexture;
 
         //Compute Shaderの設定
         FindKernelInit();
@@ -69,13 +75,6 @@ public class FluidSim2D : MonoBehaviour
 
         //壁初期設定
         SetWall();
-
-        //コマンドバッファ系
-        Camera cam = GameObject.Find("Main Camera").GetComponent<Camera>();//コンポーネント
-        commandBuffer = new CommandBuffer();
-        commandBuffer.name = "heatmap instanse";
-        commandBuffer.DrawProcedural(cam.cameraToWorldMatrix, heatmapMaterial, 0, MeshTopology.Points, WX * WY, 1);
-        cam.AddCommandBuffer(CameraEvent.AfterForwardOpaque, commandBuffer);
     }
 
 
@@ -213,7 +212,6 @@ public class FluidSim2D : MonoBehaviour
 
     void SetKernels()
     {
-        heatmapMaterial.SetBuffer("VOR", VOR);//ここで描画側のshaderとcompute bufferのVORを紐づけ
         NSComputeShader.SetFloat("DT", DT);
         NSComputeShader.SetFloat("MU", MU);
 
@@ -267,6 +265,7 @@ public class FluidSim2D : MonoBehaviour
         NSComputeShader.SetBuffer(kernelVorticity, "YUN", YUN);
         NSComputeShader.SetBuffer(kernelVorticity, "YVN", YVN);
         NSComputeShader.SetBuffer(kernelVorticity, "VOR", VOR);
+        NSComputeShader.SetTexture(kernelVorticity, "Tex", renderTexture);
 
         //ここまで共通
         //ここからはCIP method関連

@@ -1,4 +1,5 @@
-﻿#pragma kernel Newgrad_u
+﻿//表示用のRenderTextureにはVorticityで渦度を計算するのと一緒に書き込んでいることに注意
+#pragma kernel Newgrad_u
 #pragma kernel Newgrad_v
 #pragma kernel Upwind_u
 #pragma kernel Upwind_v
@@ -60,6 +61,7 @@ RWStructuredBuffer<uint> DATASRCI;
 RWStructuredBuffer<float> DATADSTF;
 RWStructuredBuffer<float> DATASRCF;
 
+RWTexture2D<float4> Tex;
 
 
 
@@ -567,6 +569,17 @@ void Vorticity(int2 id : SV_DispatchThreadID)
 	//右回りを正とする
 	float vor = uu - ud + vr - vl;
 	VOR[i + j] = vor;
+
+
+
+	vor = vor * 9.0;
+	float4 col;
+	col.x = clamp(-vor, 0, 1);
+	col.y = clamp(vor, 0, 1);
+	col.z = clamp(0.4 * (abs(vor) - 0.3), 0, 1);
+	col.w = 1;
+
+	Tex[id.xy] = col;
 }
 
 
