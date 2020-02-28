@@ -31,6 +31,5 @@ ExportedObj/
 sysinfo.txt
 
 # Builds
-*.apk
 *.unitypackage
 cip_method/ProjectSettings/XRSettings.asset
